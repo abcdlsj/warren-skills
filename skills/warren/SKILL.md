@@ -1,5 +1,5 @@
 ---
-name: warren-workspace
+name: warren
 description: Use when organizing repository work with Warren's workspace manager—projects, branch worktrees, durable sessions, and agent context—and when choosing safe lifecycle practices beyond CLI syntax.
 ---
 

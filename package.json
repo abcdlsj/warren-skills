@@ -1,0 +1,26 @@
+{
+  "name": "@abcdlsj/warren-skills",
+  "version": "0.1.0",
+  "description": "Warren workspace-management skill for AI coding agents",
+  "files": [
+    "skills",
+    "README.md"
+  ],
+  "keywords": [
+    "agent-skills",
+    "codex",
+    "warren",
+    "workspace"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abcdlsj/warren-skills.git"
+  },
+  "homepage": "https://github.com/abcdlsj/warren-skills#readme",
+  "bugs": {
+    "url": "https://github.com/abcdlsj/warren-skills/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

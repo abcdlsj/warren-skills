@@ -1,43 +1,135 @@
 ---
 name: warren
-description: Use when organizing repository work with Warren's workspace manager—projects, branch worktrees, durable sessions, and agent context—and when choosing safe lifecycle practices beyond CLI syntax.
+description: Use when organizing repository work with Warren's workspace manager—projects, branch worktrees, durable sessions, and Agent context—and when choosing safe lifecycle practices beyond CLI syntax.
 ---
 
 # Warren workspace practice
 
-Warren is the Host's source of truth for development context. Use it to keep a repository, its branch checkouts, and their running processes identifiable across clients and reconnects.
+Warren is the source of truth for development context. Resolve the resource and
+its exact ID before mutating it. A Warren Session ID, provider thread ID, and
+transcript path are different identities; names, cwd, branch, and timestamps
+are not IDs.
 
 ## Resource semantics
 
-| Resource | Meaning | Good default |
+| Resource | Meaning | Default use |
 | --- | --- | --- |
-| `project` | A registered repository identity | Register the repository once; do not make one project per branch. |
-| `workspace` / `worktree` | A Warren-managed checkout for one branch and intent | Put code changes and their sessions here. |
-| `session` | A durable running terminal or agent process | Reuse or move it; do not recreate it just because the UI changed. |
-| `terminal-group` / `group` | A standalone terminal context without a repository workspace | Use for host-level or exploratory work. |
-| `endpoint` | The Host that owns the preceding resources | Treat identical names on different endpoints as unrelated. |
+| `project` | Registered repository identity | Register once; do not create one per branch. |
+| `workspace` / `worktree` | Warren-managed checkout for a branch and intent | Put repository changes and their processes here. |
+| `agent` | Warren-integrated Codex or Claude process | Primary interface for supported Agents. |
+| `session` | Durable Warren-managed PTY process | Use for shells, Trae, and other interactive programs. |
+| `terminal-group` / `group` | Standalone terminal context without a repository workspace | Use for host-level or exploratory work. |
+| `endpoint` | Host that owns the resources above | Treat the same name on different endpoints as unrelated. |
 
-A Warren session ID, provider thread ID, and transcript path are different identities. A display name, cwd, branch name, or timestamp is context—not an ID.
+Only Codex and Claude are supported Agent providers. A shell/custom session is
+Agent-capable only after Warren records a Codex/Claude binding; a Trae preset is
+still a shell session and has no Agent transcript, activity, or Agent CLI
+semantics.
 
-## Best-practice workflow
+## Agent workflow
 
-1. **Choose the scope before the command.** Decide whether the request concerns a repository, a branch checkout, a running process, or a host-level shell. This prevents putting a repository task in a terminal group or registering every checkout as a project.
-2. **Resolve, then mutate.** Select the endpoint explicitly when needed. Inspect JSON listings (`project`, `workspace`, and `session`) and use an exact ID. For the current shell, use `warren session current`; trust `WARREN_SESSION_ID`, never cwd or title. Stop on a missing or ambiguous match.
-3. **Let Warren own worktrees.** Register an existing repository with `project add`; create a new branch checkout with `workspace create <PROJECT_ID> --branch <branch>`. Prefer Warren's managed default path. Use its project import flow for an existing external worktree instead of creating a duplicate record.
-4. **Keep process and context together.** Create a session in the workspace that owns its work. When context changes, move the session instead of restarting it; the process, output history, and session identity survive the move. Preflight a current-session move before applying it:
+Use Agent commands for Codex/Claude. `agent` IDs are Warren Session IDs;
+`agentThreadId` and the transcript path are separate fields in roster output.
+
+Create with an explicit provider and exactly one initial-prompt mode:
+
+```sh
+warren agent create WORKSPACE_ID \
+  --provider codex --command codex-alias --prompt "Run the relevant tests"
+warren agent create WORKSPACE_ID \
+  --provider claude --no-prompt
+```
+
+- `--provider` must be `codex` or `claude`; it selects transcript semantics.
+- `--command` is the executable, alias, or wrapper entry point plus its options.
+  It may not contain shell operators/substitutions, a positional prompt,
+  `--prompt`, or a provider's non-interactive/print mode. Pass initial text only
+  with `--prompt`.
+- `--prompt` is appended using the provider's initial-prompt convention.
+  `--no-prompt` explicitly creates an idle Agent. One of the two is required.
+- `--wait` is only valid with `--prompt`; use it when the first turn must
+  finish before the command returns.
+
+Use `agent send` for later turns. It waits for the Agent binding/transcript,
+writes the provider composer, and submits the separate Enter event. Do not use
+`session send` to drive a Codex/Claude TUI.
+
+Use `agent read` to read the normalized transcript, never the PTY. Its default
+projection is the newest useful activities (20) with text fields capped at
+2,000 characters. Use `--recent N`, `--all`, `--include`, `--filter`, `--full`,
+or `--text-only` when needed. Use `agent attach` only for the live raw TTY.
+`agent wait` waits for the current or next turn to finish.
+
+Use `agent current` or `--current` only when `WARREN_SESSION_ID` identifies the
+target. Never infer the current Agent from cwd, title, or transcript filename.
+Prefer `agent move`, `agent rename`, `agent pin`, and `agent remove` for Agent
+lifecycle operations.
+
+## Generic session workflow
+
+Use `session` for a generic PTY, not for creating or conversing with Codex or
+Claude:
+
+```sh
+warren session create WORKSPACE_ID --kind shell --command bash
+warren session send SESSION_ID "Run a shell command"
+warren session read SESSION_ID --timeout 8s
+warren session attach SESSION_ID
+```
+
+`session read` returns raw terminal output and may include TUI control data;
+it is not a text-only Agent reader. `session send` writes raw terminal input
+and has no Agent turn/wait semantics. `session attach` is the interactive TTY
+operation. The `trae` preset belongs here until it has an explicit Warren
+provider integration.
+
+## Lists and context
+
+Roster-heavy `list` commands (`project`, `workspace`, `terminal-group`,
+`session`, and `agent`) return at most 10 rows by default. Use `--limit N` for a
+different bounded result. Use `--all` for the complete list, preferably with a
+search so a long roster is not copied into an Agent context:
+
+```sh
+warren session list --all | rg 'pattern'
+warren agent list --all | rg 'pattern'
+```
+
+For `session list`, `--ended` selects ended sessions and cannot be combined
+with `--all`. `--json` changes the representation only; it does not disable
+the default limit. Use exact IDs from a fresh `--json` listing after filtering.
+
+## Safe lifecycle
+
+1. Select the endpoint explicitly when more than one is configured.
+2. Inspect the relevant JSON roster and resolve an exact ID. Stop on a missing
+   or ambiguous match.
+3. Let Warren own projects and worktrees:
 
    ```sh
-   warren session move --current --workspace <WORKSPACE_ID> --dry-run
+   warren project add REPOSITORY_PATH
+   warren workspace create PROJECT_ID --branch BRANCH
    ```
 
-5. **Verify state transitions.** Re-list the affected resource after a mutation. Keep the operation ID returned by a session move; undo only while its recorded post-move context is still valid.
+   Do not use `git worktree add/remove`, `mkdir`, `mv`, or direct state-file
+   edits. Omit `--path` unless a specific worktree location is required.
+4. Keep the process in the workspace that owns its work. Move an existing
+   resource instead of recreating it; the process, output history, and ID are
+   preserved.
+5. Re-list after every mutation. For session moves, preflight first and retain
+   the returned operation ID:
 
-## Anti-patterns
+   ```sh
+   warren session move --current --workspace WORKSPACE_ID --dry-run
+   warren session undo OPERATION_ID
+   ```
 
-- Using `git worktree add/remove`, `mkdir`, `mv`, or direct state-file edits to manage Warren workspaces. These bypass the registry and can orphan sessions or duplicate checkouts.
-- Choosing a target from a partial name, cwd, transcript filename, or stale session row. Human names are for display; IDs and endpoint are the authority.
-- Creating a second session because an existing one is hard to find, or sending concurrent input to one agent. Inspect first; wait for an active turn and serialize sends.
-- Moving an explicit session without a preflight/confirmation or expected source context, or deleting a workspace without deciding whether its checkout must be kept. Workspace deletion has no automatic undo.
-- Treating a terminal group as a workspace, casually forcing a custom `--path`, mixing endpoints, or exposing endpoint tokens in logs and prompts.
+   Explicit-ID moves require `--confirm` (or an expected source context). Undo
+   only while the recorded post-move context is unchanged. Workspace deletion
+   has no automatic undo.
 
-Use `--json` when another tool will consume output. Read command help for syntax, but apply the model and safeguards above even when the command itself is familiar.
+## Endpoint and credentials
+
+Use `warren --endpoint NAME` or `--server URL --token TOKEN` when the target is
+not the default endpoint. Never put endpoint tokens in logs, prompts, or
+transcripts.

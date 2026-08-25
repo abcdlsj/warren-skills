@@ -113,9 +113,13 @@ the default limit. Use exact IDs from a fresh `--json` listing after filtering.
 
    Do not use `git worktree add/remove`, `mkdir`, `mv`, or direct state-file
    edits. Omit `--path` unless a specific worktree location is required.
-4. Keep the process in the workspace that owns its work. Move an existing
-   resource instead of recreating it; the process, output history, and ID are
-   preserved.
+4. Keep the process in the workspace that owns its work. A workspace and the
+   shell or Agent handling its task are normally paired. Warren can move an
+   existing shell/session or Agent to another workspace without recreating it;
+   use that capability when the current responsibility clearly belongs
+   exclusively to another workspace. If the responsibility is ambiguous or
+   spans multiple workspaces, do not move mechanically. The process, output
+   history, and ID are preserved after a move.
 5. Re-list after every mutation. For session moves, preflight first and retain
    the returned operation ID:
 

@@ -4,8 +4,9 @@ Agent Skills for Warren workspace and session management.
 
 ## Included skills
 
-- `warren` — safe lifecycle practices for Warren projects, workspaces,
-  Agents, sessions, and endpoints.
+- `warren` — resource semantics, worked examples, and anti-patterns for Warren
+  tasks, projects, workspaces, Agents, sessions, pane arrangements, and
+  endpoints.
 
 ## Install
 

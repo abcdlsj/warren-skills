@@ -1,273 +1,161 @@
 ---
 name: warren
-description: Use when organizing repository work with Warren's workspace manager—tasks, projects, branch worktrees, pane arrangements, durable sessions, and Agent context—and when choosing safe lifecycle practices beyond CLI syntax.
+description: Use when working through Warren—creating or driving Agents, running shell Sessions, managing projects, worktrees, tasks, and pane layouts, or addressing another Warren Host. Covers which command to use and which habits are safe; flags live in `warren <command> --help`.
 ---
 
-# Warren workspace practice
+# Warren
 
-Warren is the source of truth for development context. Resolve the resource and
-its exact ID before mutating it. A Warren Session ID, provider thread ID, and
-transcript path are different identities; names, cwd, branch, and timestamps
-are not IDs.
+This skill covers which Warren command fits a job and which habits keep work
+safe. For flags and defaults, run `warren <command> --help` and
+`warren <command> <action> --help`; the installed build's help is authoritative.
 
-Run `warren <resource> --help` and `warren <resource> <action> --help` for the
-authoritative flag set of the installed build. This document covers what each
-resource means and which habits are safe, not the full syntax.
+## Resources
 
-## Resource semantics
-
-| Resource | Meaning | Default use |
+| Resource | What it is | Use it for |
 | --- | --- | --- |
-| `task` | Host-owned unit of work that may span repositories | Create when work touches more than one repository or has an external work-item identity. |
-| `project` | Registered repository identity | Register once; do not create one per branch. |
-| `workspace` / `worktree` | Warren-managed checkout for a branch and intent | Put repository changes and their processes here. |
-| `agent` | Warren-integrated Agent process with a normalized transcript | Primary interface for supported providers. |
-| `session` | Durable Warren-managed PTY process | Use for shells and other interactive programs. |
-| `pane` | Host-owned split arrangement of Sessions inside one scope | Read it to know how a Session is displayed; edit only to arrange. |
-| `endpoint` | Host that owns the resources above | Treat the same name on different endpoints as unrelated. |
+| `project` | A registered repository | Register each repository once, not once per branch. |
+| `workspace` (alias `worktree`) | A Warren-managed Git worktree for one branch | Repository changes and the processes that work on them. |
+| `task` | A unit of work that groups Workspaces, possibly across repositories | Work that spans repositories or has an external ticket. |
+| `agent` | A Session running a supported coding Agent, with a parsed transcript | Starting and talking to Codex, Claude, and the other providers in `agent create --help`. |
+| `session` | A durable terminal process | Shells and other interactive programs. |
+| `pane` | A saved split layout of Sessions in one Workspace | Arranging what is on screen. |
+| `endpoint` | A Warren Host the CLI talks to | Choosing which Host a command acts on. |
 
-Every Session belongs to exactly one Workspace. An Agent is a Session with a
-provider binding, so it belongs to a Workspace in the same way.
+Every Session, including every Agent, belongs to exactly one Workspace.
 
-## Tasks across repositories
+## Find the exact ID first
 
-A Task groups Workspaces from different repositories without flattening
-repository boundaries, and can retain a provider-neutral external identity:
+A Warren Session ID, a provider thread ID, and a transcript path are three
+different things. Names, cwd, branch, and timestamps are not IDs.
+
+1. When more than one endpoint is configured, pass `--endpoint NAME`. An ID
+   from one endpoint means nothing on another.
+2. Filter the list, then read the ID from `-q` or `--json` output:
+
+   ```sh
+   warren workspace list -q --project PROJECT_ID
+   warren session list --search auth --status running
+   warren agent list --provider codex --activity working
+   ```
+
+3. If nothing matches, or more than one thing does, stop and ask. Do not guess.
+4. List again after every change.
+
+List commands return at most 10 rows. `--json` changes the format but keeps
+that limit, so 10 results may be only part of the list.
+
+Avoid:
+
+- Piping `list --all` through `grep` or `rg` when `--search` exists.
+- Treating a 10-row result as the complete list.
+- Pasting a full `--all` list into an Agent's context.
+- Working out the current Agent from cwd, window title, or transcript file
+  name. Use `--current` only when `WARREN_SESSION_ID` is set for the target.
+
+## Agents
+
+Use `agent` commands for every supported provider:
 
 ```sh
-warren task create --name "Cross-repository delivery" --source tapd --external-id 12345
-warren task workspace create TASK_ID PROJECT_ID --branch release/feature
-warren task workspace attach TASK_ID WORKSPACE_ID
-warren task workspace list TASK_ID
-```
-
-`task workspace create` registers the Project, creates the Git worktree, and
-attaches it in one request. `task detach` and `task remove` drop the grouping
-only; the Workspace, its checkout, and its Sessions survive.
-
-Anti-patterns:
-
-- Creating one Task per branch. A Task is the work, not the checkout.
-- Registering the same repository twice to fake cross-repository work.
-- Removing a Task to clean up a Workspace. Remove the Workspace instead.
-
-## Agent workflow
-
-Use Agent commands for any supported provider. `agent` IDs are Warren Session
-IDs; `agentThreadId` and the transcript path are separate fields in roster
-output.
-
-Create with an explicit provider and exactly one initial-prompt mode:
-
-```sh
-warren agent create WORKSPACE_ID \
-  --provider codex --command codex-alias --prompt "Run the relevant tests"
+warren agent create WORKSPACE_ID --provider codex --prompt "Run the relevant tests"
 warren agent create WORKSPACE_ID --provider claude --no-prompt
+warren agent send AGENT_ID "Now fix the failing test"
+warren agent wait AGENT_ID --timeout 30m
+warren agent cancel AGENT_ID
 ```
 
-- `--provider` selects transcript and prompt semantics. The installed build's
-  accepted set is printed by `warren agent create --help`; it currently covers
-  `codex`, `claude`, `opencode`, `pi`, `qoder`, and `antigravity`. Confirm from
-  help rather than assuming a provider is present.
-- `--prompt` is appended using that provider's own startup convention
-  (positional for Codex, Claude, Pi, and Qoder; `--prompt` for OpenCode; `-i`
-  for Antigravity). Warren applies the convention; pass plain text.
-- `--no-prompt` explicitly creates an idle Agent. One of the two is required.
-- `--wait` is only valid with `--prompt`; use it with `--timeout` when the first
-  turn must finish before the command returns.
-- `--command` is the executable, alias, or wrapper entry point plus its options.
-  It may not contain shell operators/substitutions, a positional prompt, a
-  prompt option, or a provider's non-interactive/print mode. Omit it to use the
-  provider's default executable.
-- `--agent-handler` selects the transport inside a provider family (`tui`,
-  `cli`, `acp`). Omit it unless a specific transport is required: the default is
-  the TUI handler, and a wrong handler changes which capabilities and transcript
-  semantics the Agent has.
+`agent send` submits a turn, `agent wait` waits for the current or next turn to
+finish, and `agent cancel` stops a running turn the way the provider expects.
 
-Use `agent send` for later turns. It waits for the Agent binding/transcript,
-writes the provider composer, and submits the separate Enter event. With no
-TEXT it reads the prompt from stdin.
-
-Use `agent read` for the normalized transcript, never the PTY. Its default
-projection is the newest 20 user/assistant/error activities with text capped at
-2,000 characters. Widen deliberately, cheapest first:
+Read the transcript with `agent read`, starting with the smallest view and
+widening only when needed:
 
 ```sh
-warren agent read AGENT_ID --text-only            # user and assistant text only
-warren agent read AGENT_ID --recent 50 --tools    # add tool-call summaries
-warren agent read AGENT_ID --tool-output          # add bounded tool results
-warren agent read AGENT_ID --chars 8000           # raise the per-field cap
+warren agent read AGENT_ID --text-only            # user and assistant text
+warren agent read AGENT_ID --recent 50 --tools    # add tool calls
+warren agent read AGENT_ID --tool-output          # add tool results
 ```
 
-`--all` returns every matching activity and `--full` returns the complete
-canonical event history; `--full` cannot be combined with projection flags.
-Both can flood a context window. Use `--include`/`--filter` to select activity
-types instead of reading everything.
+`--all` and `--full` can fill a context window; reach for them last.
 
-`agent wait` waits for the current or next turn. `agent cancel` stops the
-running turn through the provider's own interrupt. `agent attach` is the live raw
-TTY. Use `agent current` or `--current` only when `WARREN_SESSION_ID` identifies
-the target. Prefer `agent move`, `agent rename`, `agent pin`, and
-`agent remove` for lifecycle operations; `agent remove --dry-run` reports what
-would end.
+Avoid:
 
-Anti-patterns:
+- Driving, reading, or interrupting an Agent with `session send` or
+  `session read`. Raw terminal input bypasses Warren's turn handling and
+  corrupts the Agent's input box.
+- Putting a print or non-interactive mode, a prompt, or shell operators in
+  `--command`. It names only the executable or wrapper and its options.
+- Passing `--agent-handler` without a specific reason. Each handler gives the
+  Agent different capabilities.
+- Treating a provider started in a shell Session as an Agent. Only Sessions
+  created with `agent create` have a transcript and Agent commands. The `trae`
+  preset is a plain shell Session.
 
-- Using `session send`/`session read` to drive, read, or interrupt a provider
-  TUI. The Agent commands own turn semantics; raw PTY writes desynchronize the
-  composer.
-- Inferring the current Agent from cwd, window title, or transcript filename.
-- Reaching for `--full` before `--text-only` or `--recent N`.
-- Passing a print/non-interactive provider flag through `--command`.
-- Assuming a provider is Agent-capable because its binary runs in a shell
-  Session. A Session is Agent-capable only after Warren records a provider
-  binding. A `trae` preset is a shell Session and has no Agent transcript,
-  activity, or Agent CLI semantics.
+## Shell Sessions
 
-## Generic session workflow
-
-Use `session` for a generic PTY, not for creating or conversing with an Agent
-provider:
+Use `session` for shells and programs that are not Agents:
 
 ```sh
 warren session create WORKSPACE_ID --kind shell --command bash
-warren session send SESSION_ID "Run a shell command"
-warren session read SESSION_ID --timeout 8s --contains "done"
-warren session attach SESSION_ID
+warren session send SESSION_ID "make test"
+warren session read SESSION_ID --timeout 8s --contains "PASS"
 ```
 
-`session read` returns raw terminal output and may include TUI control data; it
-is not a text-only reader. `session send` writes raw terminal input and has no
-turn or wait semantics; it appends a carriage return so the line is submitted,
-and `--raw` sends the bytes exactly as given. `session attach` is the
-interactive TTY operation.
+`session send` types the text and presses Enter; it does not wait for
+anything. `session read` returns raw terminal output, which may include control
+sequences.
 
-## Pane arrangements
+## Projects, worktrees, and tasks
 
-A pane arrangement is durable Host state, not a client layout. One Workspace may
-hold several arrangements; one is rendered at a time, so
-switching never disturbs the others.
+Let Warren create and track worktrees:
 
 ```sh
-warren session panes SESSION_ID            # how this Session is arranged, and who displays it
-warren pane list --workspace WORKSPACE_ID
-warren pane split --pane PANE_ID --session SESSION_ID --axis vertical
+warren project add REPOSITORY_PATH --auto-import-worktrees
+warren workspace create PROJECT_ID --branch BRANCH
+warren task workspace create TASK_ID PROJECT_ID --branch BRANCH
 ```
 
-In `session panes` output, GROUP/PANE come from the Host's arrangement, and
-SCREEN names a client displaying the Session right now; empty means none is.
+`--auto-import-worktrees` adopts worktrees that already exist on disk.
+`task workspace create` registers the project, creates the worktree, and adds
+it to the task in one step.
 
-Anti-patterns:
-
-- Treating `pane close` as ending a Session. It takes the Pane off screen; the
-  Session keeps running and stays reachable as an ordinary Tab.
-- Treating `pane remove` as deleting Sessions. It deletes the arrangement.
-- Ending a Session to tidy a layout. Edit the arrangement instead.
-
-## Lists and context
-
-Roster-heavy `list` commands (`task`, `project`, `workspace`, `session`,
-`agent`, `pane`) return at most 10 rows with long fields truncated.
-Narrow the query instead of dumping the roster:
+Keep each Session in the Workspace whose work it is doing. Move it with
+`session move` or `agent move` only when the work clearly belongs to one other
+Workspace; a move keeps the process, its output, and its ID. Preview the move
+and guard against a list that changed since you read it:
 
 ```sh
-warren workspace list -q --project PROJECT_ID          # IDs only
-warren session list --search auth --status running
-warren agent list --provider codex --activity working
-warren workspace list --unmerged --has-sessions
+warren session move SESSION_ID --workspace WORKSPACE_ID --dry-run
+warren session move SESSION_ID --workspace WORKSPACE_ID \
+  --expected-workspace CURRENT_WORKSPACE_ID
+warren session undo OPERATION_ID
 ```
 
-- `-q`/`--quiet` prints IDs only and is the cheapest form for scripting and for
-  handing IDs to another Agent.
-- `--search TEXT` plus a scope filter beats `--all` piped through a text tool.
-- `--limit N` raises or lowers the bound when a count is actually needed.
-- `--json` changes the representation only; it does **not** disable the default
-  limit. A 10-element JSON array may be a truncated roster, not the whole one.
-- For `session list` and `agent list`, `--ended` selects ended rows and cannot
-  be combined with `--all`.
+Avoid:
 
-Resolve exact IDs from a fresh `--json` or `-q` listing after filtering, and
-stop on a missing or ambiguous match rather than guessing.
+- Running `git worktree add/remove`, `mkdir`, or `mv` on worktrees, or editing
+  Warren's state files.
+- Creating one task per branch. A task is the work; a Workspace is a checkout.
+- Registering the same repository twice.
+- Moving a Session whose work spans several Workspaces.
 
-Anti-patterns:
+## Removing things
 
-- `warren session list --all | rg pattern` when `--search` exists.
-- Reading a 10-row default as a complete roster, in table or JSON form.
-- Copying a full `--all` roster into an Agent context.
+Only a Session move can be undone, with `session undo`. Removing a Workspace,
+project, or task cannot be undone. Check what will go before removing:
 
-## Safe lifecycle
+- `session remove --dry-run` and `agent remove --dry-run` show what would end.
+- `workspace remove --keep-worktree` unregisters the Workspace and leaves the
+  Git checkout on disk.
+- Removing a task, or detaching a Workspace from one, leaves the Workspaces and
+  their Sessions untouched. Remove the Workspace itself to clean it up.
+- `pane close` takes a pane off screen and `pane remove` deletes a saved
+  layout. Neither ends a Session. To tidy the screen, edit the layout instead
+  of ending Sessions.
 
-1. Select the endpoint explicitly when more than one is configured.
-2. Inspect the relevant JSON or quiet roster and resolve an exact ID.
-3. Let Warren own projects and worktrees:
+## Credentials
 
-   ```sh
-   warren project add REPOSITORY_PATH
-   warren project add REPOSITORY_PATH --auto-import-worktrees
-   warren workspace create PROJECT_ID --branch BRANCH
-   ```
-
-   Do not use `git worktree add/remove`, `mkdir`, `mv`, or direct state-file
-   edits. When a repository already has Git worktrees on disk, adopt them with
-   `project add --auto-import-worktrees` rather than recreating them. Omit
-   `--path` unless a specific worktree location is required.
-4. Keep the process in the workspace that owns its work. A Workspace and the
-   shell or Agent handling its task are normally paired. Warren can move an
-   existing Session or Agent to another Workspace without recreating
-   it; use that when the current responsibility clearly belongs exclusively to
-   another scope. If the responsibility is ambiguous or spans multiple
-   workspaces, do not move mechanically. The process, output history, and ID
-   are preserved after a move.
-5. Re-list after every mutation. For Session moves, preflight first and retain
-   the returned operation ID:
-
-   ```sh
-   warren session move --current --workspace WORKSPACE_ID --dry-run
-   warren session move SESSION_ID --workspace WORKSPACE_ID \
-     --expected-workspace CURRENT_WORKSPACE_ID
-   warren session undo OPERATION_ID
-   ```
-
-   Explicit-ID moves require `--confirm` or an expected-source context;
-   `--expected-workspace` and `--expected-agent-session` make the move fail
-   rather than act on a roster that changed under you. Undo only while the
-   recorded post-move context is unchanged.
-6. Removal is asymmetric, so check the blast radius before removing:
-   `session undo` is the only undo. Workspace, Project, and Task removal have
-   none. `workspace remove --keep-worktree` keeps the Git checkout on disk when
-   only the Warren registration should go.
-
-## Endpoints, remote hosts, and credentials
-
-One Warren CLI can address several Hosts. Resources never cross endpoints, and
-an ID from one endpoint is meaningless on another.
-
-```sh
-warren endpoint add vps --url http://127.0.0.1:8789 --token TOKEN --use
-warren endpoint add box --ssh box --ssh-remote 127.0.0.1:8789
-warren ssh TARGET                     # bootstrap the remote daemon over a tunnel
-warren --endpoint vps workspace list -q
-```
-
-`warren ssh list` reports which SSH aliases the embedded client can resolve;
-unsupported `ProxyJump`/`ProxyCommand` aliases need a direct host or an external
-`ssh -L` tunnel plus `endpoint add`.
-
-`warren display set NAME [NAME ...]` is local client configuration for which
-endpoints appear in the sidebar. It is independent of the current endpoint, so
-switching endpoints does not change sidebar membership, and the explicit set
-cannot be empty.
-
-Relay puts a Host behind a shared control plane:
-
-```sh
-warren relay connect SETTINGS_URL     # enroll this Host with an admin-issued key
-warren relay share --qr               # issue one reusable pairing invite
-```
-
-Everything that grants access is a bearer credential: endpoint tokens, Relay
-enrollment keys, pairing invites, `remote share` links, and any QR code that
-encodes one. Never put any of them in
-logs, prompts, transcripts, commit contents, or an Agent's context. An
-enrollment key is a short-lived bootstrap credential and is deliberately not
-written to the endpoint configuration; do not persist it yourself.
+Endpoint tokens, Relay enrollment keys, pairing links, `remote share` links,
+and any QR code that encodes one each grant access to a Host. Never put them in
+logs, prompts, transcripts, commits, or an Agent's context. Do not save a Relay
+enrollment key anywhere; Warren uses it once and deliberately does not store it.

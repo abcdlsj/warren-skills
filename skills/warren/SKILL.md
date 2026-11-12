@@ -24,12 +24,10 @@ resource means and which habits are safe, not the full syntax.
 | `agent` | Warren-integrated Agent process with a normalized transcript | Primary interface for supported providers. |
 | `session` | Durable Warren-managed PTY process | Use for shells and other interactive programs. |
 | `pane` | Host-owned split arrangement of Sessions inside one scope | Read it to know how a Session is displayed; edit only to arrange. |
-| `terminal-group` / `group` | Terminal scope without a repository workspace | Use for host-level or exploratory work. |
 | `endpoint` | Host that owns the resources above | Treat the same name on different endpoints as unrelated. |
 
-A Session's scope is either a Workspace or a Terminal Group, never both and
-never absent. An Agent is a Session with a provider binding, so it has a scope
-in the same way.
+Every Session belongs to exactly one Workspace. An Agent is a Session with a
+provider binding, so it belongs to a Workspace in the same way.
 
 ## Tasks across repositories
 
@@ -65,7 +63,6 @@ Create with an explicit provider and exactly one initial-prompt mode:
 warren agent create WORKSPACE_ID \
   --provider codex --command codex-alias --prompt "Run the relevant tests"
 warren agent create WORKSPACE_ID --provider claude --no-prompt
-warren agent create --group GROUP_ID --provider opencode --prompt "Survey this host"
 ```
 
 - `--provider` selects transcript and prompt semantics. The installed build's
@@ -86,8 +83,6 @@ warren agent create --group GROUP_ID --provider opencode --prompt "Survey this h
   `cli`, `acp`). Omit it unless a specific transport is required: the default is
   the TUI handler, and a wrong handler changes which capabilities and transcript
   semantics the Agent has.
-- `WORKSPACE_ID` is optional. Pass it, or `--group`, to state the scope; do not
-  rely on an implicit default when more than one scope is plausible.
 
 Use `agent send` for later turns. It waits for the Agent binding/transcript,
 writes the provider composer, and submits the separate Enter event. With no
@@ -109,7 +104,8 @@ canonical event history; `--full` cannot be combined with projection flags.
 Both can flood a context window. Use `--include`/`--filter` to select activity
 types instead of reading everything.
 
-`agent wait` waits for the current or next turn. `agent attach` is the live raw
+`agent wait` waits for the current or next turn. `agent cancel` stops the
+running turn through the provider's own interrupt. `agent attach` is the live raw
 TTY. Use `agent current` or `--current` only when `WARREN_SESSION_ID` identifies
 the target. Prefer `agent move`, `agent rename`, `agent pin`, and
 `agent remove` for lifecycle operations; `agent remove --dry-run` reports what
@@ -117,8 +113,9 @@ would end.
 
 Anti-patterns:
 
-- Using `session send`/`session read` to drive or read a provider TUI. The
-  Agent commands own turn semantics; raw PTY writes desynchronize the composer.
+- Using `session send`/`session read` to drive, read, or interrupt a provider
+  TUI. The Agent commands own turn semantics; raw PTY writes desynchronize the
+  composer.
 - Inferring the current Agent from cwd, window title, or transcript filename.
 - Reaching for `--full` before `--text-only` or `--recent N`.
 - Passing a print/non-interactive provider flag through `--command`.
@@ -147,8 +144,8 @@ interactive TTY operation.
 
 ## Pane arrangements
 
-A pane arrangement is durable Host state, not a client layout. One Workspace or
-Terminal Group may hold several arrangements; one is rendered at a time, so
+A pane arrangement is durable Host state, not a client layout. One Workspace may
+hold several arrangements; one is rendered at a time, so
 switching never disturbs the others.
 
 ```sh
@@ -169,8 +166,8 @@ Anti-patterns:
 
 ## Lists and context
 
-Roster-heavy `list` commands (`task`, `project`, `workspace`, `terminal-group`,
-`session`, `agent`, `pane`) return at most 10 rows with long fields truncated.
+Roster-heavy `list` commands (`task`, `project`, `workspace`, `session`,
+`agent`, `pane`) return at most 10 rows with long fields truncated.
 Narrow the query instead of dumping the roster:
 
 ```sh
@@ -216,7 +213,7 @@ Anti-patterns:
    `--path` unless a specific worktree location is required.
 4. Keep the process in the workspace that owns its work. A Workspace and the
    shell or Agent handling its task are normally paired. Warren can move an
-   existing Session or Agent to another Workspace or Group without recreating
+   existing Session or Agent to another Workspace without recreating
    it; use that when the current responsibility clearly belongs exclusively to
    another scope. If the responsibility is ambiguous or spans multiple
    workspaces, do not move mechanically. The process, output history, and ID
@@ -268,8 +265,9 @@ warren relay connect SETTINGS_URL     # enroll this Host with an admin-issued ke
 warren relay share --qr               # issue one reusable pairing invite
 ```
 
-Everything Relay-related is a bearer credential: endpoint tokens, enrollment
-keys, pairing invites, and the QR PNG that encodes one. Never put any of them in
+Everything that grants access is a bearer credential: endpoint tokens, Relay
+enrollment keys, pairing invites, `remote share` links, and any QR code that
+encodes one. Never put any of them in
 logs, prompts, transcripts, commit contents, or an Agent's context. An
 enrollment key is a short-lived bootstrap credential and is deliberately not
 written to the endpoint configuration; do not persist it yourself.
